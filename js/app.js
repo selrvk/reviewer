@@ -121,6 +121,11 @@
   let exam = null;          // mock exam state survives navigation
   let examTick = null;
 
+  const practice = window.createPractice ? window.createPractice({
+    main, esc, inline, rich, renderBlock, codeBlock, highlight, dedent,
+    store: () => store, save, renderNav: () => renderNav()
+  }) : null;
+
   function parts() {
     return location.hash.replace(/^#\/?/, "").split("/").map((p) => { try { return decodeURIComponent(p); } catch (e) { return p; } });
   }
@@ -133,6 +138,7 @@
     document.getElementById("menu-btn").setAttribute("aria-expanded", "false");
 
     if (a === "t" && byId[b]) renderTopic(byId[b], c || "notes", d);
+    else if (a === "practice" && practice) { practice.render(b, c); window.scrollTo(0, 0); }
     else if (a === "mock") renderMock();
     else if (a === "cram") renderCram();
     else if (a === "search") renderSearch(b || "");
@@ -152,7 +158,7 @@
       '<span class="tree-label">' + label + "</span>" + (meta ? '<span class="tree-meta">' + meta + "</span>" : "") + "</a>";
 
     let html = '<div class="tree-root">~/amdocs-review/</div>';
-    html += item("#/", "README.md", "", !a || (a !== "t" && a !== "mock" && a !== "cram" && a !== "search"), "file first");
+    html += item("#/", "README.md", "", !a || !["t", "mock", "cram", "search", "practice"].includes(a), "file first");
     TOPICS.forEach((t) => {
       const s = topicStats(t);
       const here = a === "t" && b === t.id;
@@ -164,6 +170,17 @@
         item("#/t/" + t.id + "/quiz", "quiz.sh", s.best != null ? "best " + s.best + "%" : t.quiz.length + " q", here && c === "quiz") +
         "</div></div>";
     });
+    if (practice) {
+      const ps = practice.stats();
+      const here = a === "practice";
+      html += '<div class="tree-dir" style="--accent: var(--practice)">' +
+        item("#/practice/java", "practice/", (ps.javaSolved + ps.sqlSolved) + "/" + (ps.javaTotal + ps.sqlTotal), false, "dir") +
+        '<div class="tree-children">' +
+        item("#/practice/java", "java-problems/", ps.javaSolved + "/" + ps.javaTotal, here && (b || "java") === "java") +
+        item("#/practice/sql", "sql-problems/", ps.sqlSolved + "/" + ps.sqlTotal, here && b === "sql" && c !== "playground") +
+        item("#/practice/sql/playground", "sql-playground.sql", "", here && b === "sql" && c === "playground") +
+        "</div></div>";
+    }
     const lastMock = store.mock[store.mock.length - 1];
     const mockMeta = exam && !exam.done ? '<span class="live">● running</span>' : lastMock ? "last " + lastMock.pct + "%" : "";
     html += item("#/mock", "mock-exam.sh", mockMeta, a === "mock", "file");
@@ -215,7 +232,7 @@
       '<section class="hero">' +
       '<div class="eyebrow"><span class="ps1">~/amdocs-review $</span> <span class="typed">./prepare --interview</span></div>' +
       "<h1>Amdocs interview reviewer: <em>Java, Unix and SQL</em></h1>" +
-      '<p class="lede">Candidates most often report these three technical areas, so this reviewer covers each one in depth, then adds the telecom basics and HR questions. Every topic has study notes, interview Q&amp;A you can drill as flashcards, and a quiz with explanations. Progress is saved in this browser.</p>' +
+      '<p class="lede">Candidates most often report these three technical areas, so this reviewer covers each one in depth, then adds the telecom basics and HR questions. Every topic has study notes, interview Q&amp;A you can drill as flashcards, and a quiz with explanations. There’s also hands-on Java and SQL coding practice with test cases. Progress is saved in this browser.</p>' +
       '<div class="hero-stats">' +
       '<div class="stat"><span class="stat-num">' + overall + '%</span><span class="stat-label">overall progress</span></div>' +
       '<div class="stat"><span class="stat-num">' + totalQA + '</span><span class="stat-label">interview Q&amp;A</span></div>' +
@@ -235,7 +252,10 @@
       "<li><strong>Mock exam + cram</strong>Sit a timed mixed exam the day before. Skim the cram sheet the morning of.</li>" +
       "</ol>" +
 
-      '<div class="cta-row">' +
+      '<div class="cta-row three">' +
+      '<a class="cta" href="#/practice/java" style="--accent: var(--practice)"><span class="file">./practice</span><strong>Coding practice</strong><span>' +
+      (practice ? practice.stats().javaTotal + " Java and " + practice.stats().sqlTotal + " SQL problems" : "Java and SQL problems") +
+      " with an editor and test cases, like CodeChum. Runs right in your browser.</span></a>" +
       '<a class="cta" href="#/mock"><span class="file">./mock-exam.sh</span><strong>Timed mock exam</strong><span>Mixed questions from every topic, one minute each, scored with a per-topic breakdown.</span></a>' +
       '<a class="cta" href="#/cram"><span class="file">cat cram-sheet.txt</span><strong>Last-minute cram sheet</strong><span>The facts most likely to be asked, on one printable page.</span></a>' +
       "</div></div>";
@@ -786,6 +806,13 @@
       total += res.length;
       return { t, res };
     }).filter((g) => g.res.length);
+    if (practice) {
+      const hits = practice.searchItems().filter((x) => x.text.toLowerCase().includes(q));
+      if (hits.length) {
+        groups.push({ t: { dir: "practice/", accent: "practice" }, res: hits.map((x) => ({ kind: x.kind, title: x.title, href: x.href, snip: snippet(x.text, q) })) });
+        total += hits.length;
+      }
+    }
 
     main.innerHTML = '<div class="page">' +
       '<header class="topic-head"><div class="eyebrow"><span class="ps1">~/amdocs-review $</span> grep -ri "' + esc(raw) + '" .</div>' +
@@ -840,8 +867,8 @@
 
   document.getElementById("reset-btn").addEventListener("click", () => {
     if (!confirm("Reset all progress (read notes, known cards, quiz and mock scores)?")) return;
-    const theme = store.theme, date = store.date;
-    store = { theme, date };
+    const theme = store.theme, date = store.date, code = store.code; // keep code drafts
+    store = { theme, date, code };
     ensure(); save(); route();
   });
 
